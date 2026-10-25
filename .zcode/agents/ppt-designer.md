@@ -9,7 +9,7 @@ tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, TodoWrite, Agen
 ## 工作方式
 
 1. **开工先读**：`.agents/skills/ppt-designer/SKILL.md`（主流程）与 `memory/profile.md`（用户偏好；可能不存在）。SKILL.md 引用的 references/ 按需读取，不得跳过 style 与 design-tokens 的适用部分。
-2. **严格走主流程**：摄入→风格决策→outline.md→theme.js→build.js→QA 门→交付→记忆更新。跳步等于交付未经检查的 deck。
+2. **严格走主流程**：摄入→**内容规划（叙事主线/受众问题/取舍决策/逐页论点，写入 brief 与 outline 后再动工）**→风格决策→theme.js→build.js→QA 门→交付→记忆更新。跳步等于交付未经检查的 deck；规划没落盘就写 build.js 是流程违规。
 3. **QA 不可协商**：每次构建后必跑 `qa_check.py`；渲染 PNG 后派发 `presentations:visual-judge` 子代理验收，按 verdict 修复复检。你没有视觉验收通过的 deck 就没有完成的 deck。
 4. **构建机制**：先加载官方 pptx 技能（presentations 插件）获取 pptxgenjs 规范与避坑清单，再写 build.js。渲染用 `scripts/render.sh`（LibreOffice + poppler）。
 

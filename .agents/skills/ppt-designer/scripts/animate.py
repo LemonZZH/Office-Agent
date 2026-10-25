@@ -23,6 +23,10 @@ trigger: afterPrev(自动接续) | withPrev(同时) | click(点击，开新组)
 通用参数: dur(ms) delay(ms) stagger(ms) autoRev repeat(N 或 "indefinite") accel decel(0-100)
 
 效果一览:
+  auto  {"target": "*", "effect": "auto"} —— 角色感知自动编排（推荐默认）：
+        标题/副标题/页脚/图注/装饰/辉光等"铬件"不动画；截图整块 fade、大数字 zoomIn、
+        正文按行成组级联；单页进场总时长收敛在 ~3.5s 内。可用 dur/stagger 覆盖节奏
+        （高端档建议 {"effect":"auto","dur":650,"stagger":200}）。
   进场  fade appear wipe(dir) flyIn(dir) zoomIn(from%)
         wheel wheel2 wheel4 wheel8 checkerboard(dir) blinds(dir) circle diamond
         dissolveIn strips(dir) wedge randomBar(dir)
@@ -32,6 +36,9 @@ trigger: afterPrev(自动接续) | withPrev(同时) | click(点击，开新组)
   路径  move(dx, dy)（slide 宽高小数，y 向下为正）
   构建  "chart": "category"|"series"  图表按类/按系列逐一构建
         "byPara": true                 文本逐段进场（target 须为具体名称）
+
+编排原则（写 anim.json 时遵守）: 铬件不动、焦点先行、同行成组、有理由才强调；
+点名效果(name)负责"特殊时刻"，其余交给 auto——不要用 "*" 手工扫场。
 """
 import json
 import sys
@@ -143,6 +150,103 @@ def para_indexes(slide, spid):
         if s.shape_id == spid and getattr(s, "has_text_frame", False):
             return [i for i, p in enumerate(s.text_frame.paragraphs) if p.text.strip()]
     return []
+
+
+def shape_by_id(slide, spid):
+    for s in walk_pptx_shapes(slide.shapes):
+        if s.shape_id == spid:
+            return s
+    return None
+
+
+def max_font_pt(sh, default=18.0):
+    best = 0.0
+    if sh is not None and getattr(sh, "has_text_frame", False):
+        for pa in sh.text_frame.paragraphs:
+            for r in pa.runs:
+                if r.font.size is not None:
+                    best = max(best, r.font.size.pt)
+    return best or default
+
+
+EMU = 914400
+
+
+def classify(slide, shapes):
+    """按版式角色分类: static(铬件) | focal(焦点) | body(正文) | chart。
+    判定用文字内容/字号/位置——标题区、页脚带、图注、无字装饰与辉光图都不动画。"""
+    roles = {}
+    for spid, name, kind, x, y in shapes:
+        y_in = y / EMU
+        sh = shape_by_id(slide, spid)
+        txt = (sh.text_frame.text.strip()
+               if sh is not None and getattr(sh, "has_text_frame", False) else "")
+        if kind in ("chart", "table"):
+            roles[spid] = "chart"
+        elif kind == "pic":
+            roles[spid] = "static" if "glow" in (name or "").lower() else "focal"
+        elif not txt:
+            roles[spid] = "static"                       # 线条/卡片底/圆环/装饰
+        else:
+            pt = max_font_pt(sh)
+            if y_in > 6.9:
+                roles[spid] = "static"                   # 页脚/页码/来源行
+            elif y_in < 1.45 and pt >= 20:
+                roles[spid] = "static"                   # 标题
+            elif y_in < 1.45 and pt <= 15:
+                roles[spid] = "static"                   # 副标题
+            elif pt <= 12.5 and y_in > 5.3:
+                roles[spid] = "static"                   # 图注
+            elif pt >= 38:
+                roles[spid] = "focal"                    # 大数字
+            else:
+                roles[spid] = "body"
+    return roles
+
+
+def build_auto(slide, shapes, used, base, page_no):
+    """自动编排：返回 {'auto': True, 'items': [(eff, item, start)]}。
+    规则: 铬件静态；截图 fade、大数字 zoomIn、正文 fade；同行(Δy<0.55)成组，
+    组内小 stagger、组间顺序推进；总时长 >3.6s 自动压缩节奏。"""
+    roles = classify(slide, shapes)
+    items = []
+    n_static = 0
+    for spid, name, kind, x, y in shapes:
+        role = roles.get(spid)
+        if role in (None, "chart", "static") or spid in used:
+            if role == "static":
+                n_static += 1
+            continue
+        items.append((y, x, spid, kind, role))
+    items.sort()
+    batches = []
+    for y, x, spid, kind, role in items:
+        y_in = y / EMU
+        if batches and abs(y_in - batches[-1][0]) < 0.55 and len(batches[-1][1]) < 4:
+            batches[-1][1].append((x, spid, kind, role))
+        else:
+            batches.append([y_in, [(x, spid, kind, role)]])
+    stag = base.get("stagger", 90)
+    gap = 90
+    dur = base.get("dur", 380)
+    projected = len(batches) * (dur + gap) + sum(len(b[1]) for b in batches) * stag
+    if projected > 3600:
+        k = 3600 / projected
+        stag, gap = max(45, int(stag * k)), max(40, int(gap * k))
+    out, t = [], 0
+    for _y, its in batches:
+        its.sort()
+        for j, (_x, spid, kind, role) in enumerate(its):
+            if role == "focal":
+                e = {"effect": "fade" if kind == "pic" else "zoomIn",
+                     "trigger": "afterPrev", "from": 55,
+                     "dur": min(dur + 140, 900)}
+            else:
+                e = {"effect": "fade", "trigger": "afterPrev", "dur": dur}
+            out.append((e, (e, spid, kind, None), t + j * stag))
+        t += dur + gap + (len(its) - 1) * stag
+    print(f"  ~ p{page_no} auto 编排: {len(out)} 动画 / {n_static} 静态 / {len(batches)} 批（预计 ~{t}ms）")
+    return {"auto": True, "items": out}
 
 
 def resolve_targets(effects, shapes, slide):
@@ -535,11 +639,19 @@ def apply(path, spec_path, out=None):
         if not effects:
             continue
         shapes = shapes_of(slide)
-        resolved = resolve_targets(effects, shapes, slide)
+        # 分流：auto 编排条目（应放在列表末尾）与其余点名效果
+        named_effs = [e for e in effects if e.get("effect") != "auto"]
+        auto_effs = [e for e in effects if e.get("effect") == "auto"]
+        resolved = []
+        used = set()
+        for eff in named_effs:
+            for it in resolve_targets([eff], shapes, slide):
+                resolved.append(it)
+                used.add(it[1])
         # WPS 兼容：图表挂进退场动画会在全屏放映时不触发（元素被隐藏）——
         # 默认跳过图表的进退场（随页面直接显示）；PowerPoint 场景可 spec 加 "animate_charts": true
         if not spec.get("animate_charts"):
-            skip_vis = {"appear"} | ENTRANCE | EXIT_SET
+            skip_vis = {"appear", "auto"} | ENTRANCE | EXIT_SET
             kept = []
             for eff, spid, kind, prg in resolved:
                 e = eff["effect"]
@@ -548,7 +660,7 @@ def apply(path, spec_path, out=None):
                     continue
                 kept.append((eff, spid, kind, prg))
             resolved = kept
-        if not resolved:
+        if not resolved and not auto_effs:
             continue
         groups, cur, t, last_start = [], {"items": [], "auto": True}, 0, 0
         for eff, spid, kind, prg in resolved:
@@ -571,6 +683,10 @@ def apply(path, spec_path, out=None):
             cur["items"].append((eff, item, start))
         if cur["items"]:
             groups.append(cur)
+        if auto_effs:
+            ag = build_auto(slide, shapes, used, auto_effs[0], idx)
+            if ag["items"]:
+                groups.append(ag)
         sld.append(timing_tree(groups))
         n_an += 1
     prs.save(out or path)
