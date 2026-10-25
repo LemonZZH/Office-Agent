@@ -61,7 +61,7 @@ module.exports = {
 };
 ```
 
-禁止在 build.js 里散落硬编码颜色；加色只能走 theme.js。
+禁止在 build.js 里散落硬编码颜色；加色只能走 theme.js——**所有**颜色（hairline、网格线、深底辅字、图表网格）都必须来自 theme 常量，这是"一键换肤"的硬前提。build.js 以 `require(process.env.THEME || "./theme.js")` 加载主题、`process.env.OUT` 决定输出名：换皮肤 = `THEME=./theme-dark.js OUT=新名字.pptx node build.js`，构建脚本零改动。
 
 ## 5. 构建 `build.js`
 
