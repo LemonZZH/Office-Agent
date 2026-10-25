@@ -159,6 +159,48 @@ def shape_by_id(slide, spid):
     return None
 
 
+def find_containers(slide, shapes, spids, used):
+    """容器归属：无字静态大形状几何包含动画文字 → {text_spid: container_spid}。
+    卡片框与其内容必须同批动画（框先、文字紧随），否则观感割裂。"""
+    res = {}
+    geom = {}
+    texts = {}
+    for spid, name, kind, x, y in shapes:
+        sh = shape_by_id(slide, spid)
+        g = None
+        try:
+            if sh is not None and sh.left is not None:
+                g = (sh.left / EMU, sh.top / EMU, sh.width / EMU, sh.height / EMU)
+        except Exception:
+            g = None
+        geom[spid] = g
+        texts[spid] = (sh.text_frame.text.strip()
+                       if sh is not None and getattr(sh, "has_text_frame", False) else "")
+    for spid in spids:
+        if spid in used or spid in res:
+            continue
+        g = geom.get(spid)
+        if not g:
+            continue
+        cx, cy = g[0] + g[2] / 2, g[1] + g[3] / 2
+        best = None
+        for spid2, name2, kind2, x2, y2 in shapes:
+            if spid2 in used or spid2 in res or spid2 == spid:
+                continue
+            g2 = geom.get(spid2)
+            if not g2 or texts.get(spid2):
+                continue  # 只考虑无字形状作为容器
+            l, tp, w, h = g2
+            if w * h < 0.55 or w < 0.9:
+                continue
+            if l - 0.06 <= cx <= l + w + 0.06 and tp - 0.06 <= cy <= tp + h + 0.06:
+                if best is None or w * h < geom[best][2] * geom[best][3]:
+                    best = spid2  # 最小包含容器（最具体）
+        if best is not None:
+            res[spid] = best
+    return res
+
+
 def max_font_pt(sh, default=18.0):
     best = 0.0
     if sh is not None and getattr(sh, "has_text_frame", False):
@@ -207,18 +249,43 @@ def classify(slide, shapes):
 def build_auto(slide, shapes, used, base, page_no, t0=0):
     """自动编排：返回 {'auto': True, 'items': [(eff, item, start)]}（start 含 t0 偏移）。
     规则: 铬件静态；截图 fade、大数字 zoomIn、正文 fade；同行(Δy<0.55)成组，
-    组内小 stagger、组间顺序推进；总时长 >3.6s 自动压缩节奏。"""
+    组内小 stagger、组间顺序推进；总时长 >3.6s 自动压缩节奏。
+    容器规则: 无字大卡片/相框与其内部动画文字**同批出现**（框先、文字紧随）——避免框文割裂。"""
     roles = classify(slide, shapes)
     items = []
     n_static = 0
+    geom = {}
     for spid, name, kind, x, y in shapes:
         role = roles.get(spid)
+        sh = shape_by_id(slide, spid)
+        g = None
+        try:
+            if sh is not None and sh.left is not None:
+                g = (sh.left / EMU, sh.top / EMU, sh.width / EMU, sh.height / EMU)
+        except Exception:
+            g = None
+        geom[spid] = g
         if role in (None, "chart", "static") or spid in used:
             if role == "static":
                 n_static += 1
             continue
-        items.append((y, x, spid, kind, role))
-    items.sort()
+        items.append([y / EMU, x / EMU, spid, kind, role])
+    items.sort(key=lambda it: (it[0], it[1]))
+
+    # —— 容器归属：无字静态大形状 ⊃ 动画文字 → 与其承载的第一条文字同批（框先、文字紧随）——
+    cmap = find_containers(slide, shapes, {it[2] for it in items}, used)
+    claimed = set()
+    for text_spid, csp in cmap.items():
+        if csp in used or csp in claimed:
+            continue
+        it = next(it for it in items if it[2] == text_spid)
+        g = geom.get(csp)
+        if not g:
+            continue
+        claimed.add(csp)
+        used.add(csp)
+        items.append([it[0], g[0] + 0.005, csp, "static", "container"])
+    items.sort(key=lambda it: (it[0], it[1]))
     batches = []
     for y, x, spid, kind, role in items:
         y_in = y / EMU
@@ -243,7 +310,7 @@ def build_auto(slide, shapes, used, base, page_no, t0=0):
                      "dur": min(dur + 140, 900)}
             else:
                 e = {"effect": "fade", "trigger": "afterPrev", "dur": dur}
-            out.append((e, (e, spid, kind, None), t0 + t + j * stag))
+            out.append((e, (e, spid, kind, None), t + j * stag))
         t += dur + gap + (len(its) - 1) * stag
     print(f"  ~ p{page_no} auto 编排: {len(out)} 动画 / {n_static} 静态 / {len(batches)} 批（预计 ~{t}ms）")
     return {"auto": True, "items": out}
@@ -665,6 +732,8 @@ def apply(path, spec_path, out=None):
             named_res = keep
         if not named_res and not auto_seq:
             continue
+        # 命名效果的容器归属：文字在无字卡片内 → 卡片同批出现（框先、文字紧随）
+        cmap_named = find_containers(slide, shapes, {it[1] for _e, it in named_res}, used)
         # 统一序列：按声明顺序展开（byPara/"*" 会一化多），auto 保留为标记
         seq = []
         named_iter = iter(named_res)
@@ -704,6 +773,11 @@ def apply(path, spec_path, out=None):
                 start = t + delay
                 t = start + dur
                 last_start = start
+            csp = cmap_named.get(spid)
+            if csp and csp not in used:
+                ce = {"effect": "fade", "trigger": "withPrev", "dur": min(dur, 400)}
+                cur["items"].append((ce, (ce, csp, kind, None), start))
+                used.add(csp)
             cur["items"].append((eff2, item, start))
         if cur is not None and cur["items"]:
             groups.append(cur)

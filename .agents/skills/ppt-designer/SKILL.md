@@ -115,6 +115,7 @@ pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
 - **默认写法** `{"target": "*", "effect": "auto"}`——角色感知自动编排：标题/副标题/页脚/图注/装饰/辉光等**铬件不动画**（随页面出现）；**截图整块 fade、大数字 zoomIn、正文按行成组级联**（同行 Δy<0.55 一批，批间顺序推进）；单页进场总时长收敛 ~3.5s。高端档放慢：`{"effect":"auto","dur":650,"stagger":200}`。
 - **点名效果只用于特殊时刻**：KPI 进场后 `pulse` 一次；流程/时间线页 `flyIn` 左起；数据强调 `wipe`（图表除外）；逐条文字 `byPara` + `click` 控制演讲节奏；"讲完即走"的退场编排。
 - **动画跟读序走**（上→下、左→右、成组不逐个）；**强调要有理由**（只强调这一页的论点数字）；禁止无差别的全元素节拍器式扫场。
+- **容器归属**：无字卡片/相框与其内部文字**必须同批出现**（框先、文字紧随）——animate.py 的 auto 与点名效果都会自动归属容器；裸文字在卡片外"割裂"出现是编排事故。
 - 示例 `decks/fde-compliance/anim.json`（auto + KPI 点名）与 `decks/effects-showcase/anim.json`（全家族演示）。
 
 **WPS 兼容性**：图表挂进退场动画在 WPS 全屏放映不触发（图表被隐藏）——animate.py 默认跳过图表的进退场（图表随页面显示，日志有提示）；确需 PowerPoint 的按类/按系列构建时，anim.json 顶层加 `"animate_charts": true` 并接受 WPS 降级为静态显示。
