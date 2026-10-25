@@ -49,7 +49,7 @@
 - **对话式迭代** —— 每份 PPT 是一个可再生工作区（大纲 + 设计 token + 构建脚本），改哪层修哪层，重建 + QA 自动验证
 - **记忆** —— 记住你的视觉偏好、设计反馈与作品索引（`memory/`），越用越懂你
 - **风格自适应** —— 汇报 / 路演 / 高端三套预设自动选择，也可用自然语言任意指定；高端档逐案定制设计方向
-- **动效注入** —— pptxgenjs 不支持动画？`animate.py` 做 OOXML 后处理：全场切换动效 + 逐页元素进场/退场（fade/wipe/flyIn/appear/退出），声明式 `anim.json` 驱动，`objectName` 精准指向元素
+- **动效注入** —— pptxgenjs 不支持动画？`animate.py` 做 OOXML 后处理，`anim.json` 声明式驱动：切换动效大家族（zoom/push/split/wheel/comb…）、元素进场/退场（fade/wipe/flyIn/zoomIn/棋盘/百叶窗/轮辐…）、**强调**（脉冲/旋转/变色/缩放）、**路径动画**、**图表按类逐根升起**、**逐段文字进场**，`objectName` 精准指向元素。全套效果演示见 [examples/effects-showcase](examples/effects-showcase/)
 - **QA 门** —— 程序化检查（溢出/重叠/越界/占位符）+ LibreOffice 渲染 + 视觉验收，不通过不交付
 
 ## 工作原理
@@ -119,8 +119,10 @@ cp /System/Library/Fonts/STHeiti*.ttc /Applications/LibreOffice.app/Contents/Res
 {
   "transition": {"type": "fade", "speed": "med"},
   "slides": {
-    "4": [{"target": "kpi-growth",  "effect": "fade", "trigger": "afterPrev", "dur": 450},
-          {"target": "chart-revenue", "effect": "wipe", "dir": "right", "trigger": "afterPrev", "dur": 700}]
+    "4": [{"target": "kpi-growth",  "effect": "pulse", "trigger": "afterPrev", "dur": 600},
+          {"target": "chart-revenue", "effect": "wipe", "dir": "up",
+           "chart": "category", "trigger": "afterPrev", "dur": 700}],
+    "6": [{"target": "bullets", "effect": "fade", "byPara": true, "trigger": "click", "dur": 350}]
   }
 }
 ```

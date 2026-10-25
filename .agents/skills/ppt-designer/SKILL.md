@@ -74,10 +74,23 @@ module.exports = {
 pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
 
 1. build.js 中给需要精确控制的元素加 `objectName`（图表、KPI 大数字、卡片等）。
-2. 写 `anim.json`：`transition`（全场切换，默认 fade）+ `slides`（逐页进场/退场）。`target: "*"` = 该页全部形状按位置排序级联；`target: objectName` = 精准指向。效果：fade / wipe / flyIn / appear / fadeOut；trigger：afterPrev / withPrev / click。
+2. 写 `anim.json`：`transition`（全场默认切换）+ `transitions`（按页覆盖）+ `slides`（逐页动效）。`target: "*"` = 该页全部形状按位置排序级联；`target: objectName` = 精准指向。
 3. `python3 scripts/animate.py deck.pptx anim.json`（原地注入；rebuild 后需重跑）。
 
-动效纪律：**动效为叙事服务，不是炫技**。汇报档克制（fade/wipe 级联）；路演档数据页用 wipe 强化"增长感"；高端档慢 fade（600–900ms、大 stagger）营造节奏；封底页留空不加元素动画。同一形状可叠加进场+退场。
+效果词汇表（trigger：afterPrev / withPrev / click；通用参数：dur / delay / stagger / autoRev / repeat / accel / decel）：
+
+| 家族 | 效果 | 用途 |
+|---|---|---|
+| 基础进场 | fade / appear / wipe(dir) / flyIn(dir) / zoomIn(from%) | 万金油；zoomIn 适合封面标题 |
+| 滤镜进场 | wheel(1/2/4/8) / checkerboard / blinds / circle / diamond / dissolveIn / strips / wedge / randomBar | 视觉花样；正式商务慎用复古滤镜（棋盘/百叶窗） |
+| 退场 | fadeOut / zoomOut / wipeOut / flyOut（滤镜加 `"out": true` 亦成退场） | 讲完即走，给结论留白 |
+| 强调 | pulse / grow / shrink（scale%）/ spin(deg) / colorTo(RRGGBB) | 关键数字/图标跳出，不动可见性 |
+| 路径 | move(dx, dy)（slide 宽高小数）+ autoRev | 表达流向、往返示意 |
+| 图表构建 | 效果上加 `"chart": "category"|"series"` | 柱图逐根升起 / 折线逐条画出——数据页首选 |
+| 文字构建 | `"byPara": true`（target 须为具体名称） | 要点逐条进场，可配合 click 控制演讲节奏 |
+| 切换 | fade / push / wipe / zoom / cover / split / wheel / comb / dissolve / checkerboard / blinds / strips / wedge / circle / random… | 全场统一，按页覆盖 |
+
+动效纪律：**动效为叙事服务，不是炫技**。汇报档克制（fade/wipe 级联 + 图表按类构建）；路演档数据页 wipe 强化"增长感"；高端档慢 fade（600–900ms、大 stagger）；封底页留空。同一形状可叠加（进场→强调→退场）。滤镜家族与强调类默认只用于演示/氛围页。参考完整示例：`decks/effects-showcase/`。
 
 ## 6. QA 门（动效注入后必跑）
 

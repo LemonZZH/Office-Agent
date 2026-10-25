@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
-"""animate.py — 给构建好的 .pptx 注入动效（pptxgenjs 不支持动画，本脚本做 OOXML 后处理）。
+"""animate.py v2 — 给构建好的 .pptx 注入动效（pptxgenjs 不支持动画，本脚本做 OOXML 后处理）。
 
 用法: python3 animate.py <deck.pptx> <anim.json> [--out <output.pptx>]
-  默认原地覆盖（build.js 重建会重新生成，动效需重跑）。
+  默认原地覆盖（build.js 重建后需重跑）。
 
 anim.json 结构:
 {
-  "transition": {"type": "fade", "speed": "med"},      // 全部页切换动效 fade|push|wipe|cut|dissolve
+  "transition":  {"type": "fade", "speed": "med"},        // 全场默认切换
+  "transitions": {"1": {"type": "zoom", "dir": "in"}},    // 按页覆盖
   "slides": {
-    "2":  [ {"target": "*", "effect": "fade", "trigger": "afterPrev",
-             "dur": 400, "stagger": 120} ],            // "*": 该页全部顶层形状按位置排序级联
-    "4":  [ {"target": "kpi-growth", "effect": "fade", "trigger": "afterPrev", "dur": 400},
-            {"target": "chart-revenue", "effect": "wipe", "dir": "right",
-             "trigger": "afterPrev", "dur": 700} ]     // target = build.js 里的 objectName
+    "2": [ {"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 120} ],
+    "4": [ {"target": "chart-revenue", "effect": "wipe", "dir": "right",
+            "chart": "category", "trigger": "afterPrev", "dur": 700} ],
+    "6": [ {"target": "bullets", "effect": "fade", "byPara": true,
+            "trigger": "afterPrev", "dur": 350, "stagger": 250} ]
   }
 }
-effect: fade | wipe(dir=left/right/up/down) | flyIn(dir=top/bottom/left/right) | appear | fadeOut(退场)
-trigger: afterPrev(自动接续) | withPrev(同时) | click(点击触发，新组)
+
+target: "*" 该页全部形状按位置级联 | objectName（build.js 的 objectName）
+trigger: afterPrev(自动接续) | withPrev(同时) | click(点击，开新组)
+通用参数: dur(ms) delay(ms) stagger(ms) autoRev repeat(N 或 "indefinite") accel decel(0-100)
+
+效果一览:
+  进场  fade appear wipe(dir) flyIn(dir) zoomIn(from%)
+        wheel wheel2 wheel4 wheel8 checkerboard(dir) blinds(dir) circle diamond
+        dissolveIn strips(dir) wedge randomBar(dir)
+  退场  fadeOut zoomOut wipeOut(dir) flyOut(dir)
+        （任一滤镜效果加 "out": true 即为退场版）
+  强调  pulse(scale%) grow(scale%) shrink(scale%) spin(deg) colorTo(RRGGBB)
+  路径  move(dx, dy)（slide 宽高小数，y 向下为正）
+  构建  "chart": "category"|"series"  图表按类/按系列逐一构建
+        "byPara": true                 文本逐段进场（target 须为具体名称）
 """
 import json
 import sys
@@ -25,17 +39,38 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 from lxml import etree
 
-P = "http://schemas.openxmlformats.org/presentationml/2006/main"
-
 FLY_FROM = {"top": (1, "0-#ppt_h/2", "y"), "bottom": (4, "1+#ppt_h/2", "y"),
             "left": (8, "0-#ppt_w/2", "x"), "right": (2, "1+#ppt_w/2", "x")}
 WIPE_FILTER = {"right": "wipe(right)", "left": "wipe(left)", "down": "wipe(down)", "up": "wipe(up)"}
 WIPE_SUBTYPE = {"right": 8, "left": 2, "down": 1, "up": 4}
 TRANSITION_SPEED = {"slow": "slow", "med": "med", "fast": "fast"}
 
+FILTER_FAMILY = {
+    # name: (filter 模板, presetID, 默认 dir 值域)
+    "wheel":  ("wheel({d})", 21, [1]),
+    "wheel2": ("wheel(2)", 21, [2]),
+    "wheel4": ("wheel(4)", 21, [4]),
+    "wheel8": ("wheel(8)", 21, [8]),
+    "checkerboard": ("checkerboard({d})", 5, ["across", "down"]),
+    "blinds": ("blinds({d})", 3, ["horizontal", "vertical"]),
+    "randomBar":    ("randombar({d})", 4, ["horizontal", "vertical"]),
+    "strips": ("strips({d})", 31, ["downRight", "downLeft", "upRight", "upLeft"]),
+    "circle": ("circle", 15, None),
+    "diamond": ("diamond(in)", 18, None),
+    "dissolveIn": ("dissolve", 9, None),
+    "wedge": ("wedge", 27, None),
+    "fade": ("fade", 10, None),
+    "plus": ("plus", 13, None),
+}
+
+ENTRANCE = {"fade", "appear", "wipe", "flyIn", "zoomIn", "dissolveIn", "circle", "diamond",
+            "wedge", "plus", "wheel", "wheel2", "wheel4", "wheel8", "checkerboard",
+            "blinds", "randomBar", "strips"}
+EXIT_SET = {"fadeOut", "zoomOut", "wipeOut", "flyOut"}
+EMPHASIS = {"pulse", "grow", "shrink", "spin", "colorTo"}
+
 
 def make(parent, tag, attrib=None, *children):
-    """在 parent 下创建命名元素（不追加，仅构造则 parent=None）。"""
     e = etree.Element(qn(tag))
     if attrib:
         for k, v in attrib.items():
@@ -53,6 +88,19 @@ class Ids:
     def next(self):
         self.n += 1
         return self.n
+
+
+def tune(ctn, eff):
+    """把 autoRev/repeat/accel/decel 写到行为时间节点上。"""
+    if eff.get("autoRev"):
+        ctn.set("autoRev", "1")
+    rep = eff.get("repeat")
+    if rep is not None:
+        ctn.set("repeatCount", rep if isinstance(rep, str) else f"{rep}x")
+    for k in ("accel", "decel"):
+        if eff.get(k) is not None:
+            ctn.set(k, str(int(eff[k] * 1000)))
+    return ctn
 
 
 def shapes_of(slide):
@@ -80,8 +128,24 @@ def shapes_of(slide):
     return out
 
 
-def resolve_targets(effects, shapes):
-    """展开 target；"*" 按位置排序（上→下、左→右）。同一形状可被多次动效（进场+退场）。"""
+def walk_pptx_shapes(shapes):
+    for s in shapes:
+        if s.shape_type == 6:
+            yield from walk_pptx_shapes(s.shapes)
+        else:
+            yield s
+
+
+def para_indexes(slide, spid):
+    """有文字的段落索引列表。"""
+    for s in walk_pptx_shapes(slide.shapes):
+        if s.shape_id == spid and getattr(s, "has_text_frame", False):
+            return [i for i, p in enumerate(s.text_frame.paragraphs) if p.text.strip()]
+    return []
+
+
+def resolve_targets(effects, shapes, slide):
+    """展开 target → [(eff, spid, kind, prg)]；prg=(st,end) 表示段落范围。"""
     resolved = []
     for eff in effects:
         if eff["target"] == "*":
@@ -90,25 +154,41 @@ def resolve_targets(effects, shapes):
                 e2 = dict(eff)
                 if "stagger" in eff:
                     e2["delay"] = eff.get("delay", 0) + i * eff["stagger"]
-                resolved.append((e2, s[0], s[2]))
+                resolved.append((e2, s[0], s[2], None))
         else:
             m = [s for s in shapes if s[1] == eff["target"]]
-            if not m:  # 模糊匹配兜底
+            if not m:
                 m = [s for s in shapes if eff["target"] in s[1]]
             if not m:
                 print(f"  ! 未找到目标形状: {eff['target']}（跳过）")
                 continue
-            resolved.append((dict(eff), m[0][0], m[0][2]))
+            spid, kind = m[0][0], m[0][2]
+            if eff.get("byPara"):
+                idxs = para_indexes(slide, spid)
+                if not idxs:
+                    print(f"  ! {eff['target']} 无文本段落（跳过 byPara）")
+                    continue
+                for k, st in enumerate(idxs):
+                    e2 = dict(eff)
+                    e2["delay"] = eff.get("delay", 0) + k * eff.get("stagger", 220)
+                    resolved.append((e2, spid, kind, (st, st)))
+            else:
+                resolved.append((dict(eff), spid, kind, None))
     return resolved
 
 
-def tgt(spid):
+def tgt(item):
+    spid, kind, prg = item[1], item[2], item[3]
     t = etree.Element(qn("p:tgtEl"))
-    make(t, "p:spTgt", {"spid": spid})
+    if prg is not None:
+        tx = make(t, "p:txEl")
+        make(tx, "p:pRg", {"st": prg[0], "end": prg[1]})
+    else:
+        make(t, "p:spTgt", {"spid": spid})
     return t
 
 
-def bhvr(ids, spid, attr=None, dur=None, extra_delay=None, additive=None):
+def bhvr(ids, item, attr=None, dur=None, extra_delay=None, additive=None, eff=None):
     b = etree.Element(qn("p:cBhvr"))
     if additive:
         b.set("additive", additive)
@@ -121,34 +201,37 @@ def bhvr(ids, spid, attr=None, dur=None, extra_delay=None, additive=None):
     if extra_delay is not None:
         st = make(ctn, "p:stCondLst")
         make(st, "p:cond", {"delay": extra_delay})
-    b.append(tgt(spid))
+    if eff:
+        tune(ctn, eff)
+    b.append(tgt(item))
     if attr:
         al = make(b, "p:attrNameLst")
         make(al, "p:attrName").text = attr
     return b
 
 
-def set_vis(ids, spid, val, delay=0):
+def set_vis(ids, item, val, delay=0):
     s = etree.Element(qn("p:set"))
-    b = bhvr(ids, spid, attr="style.visibility", dur=1, extra_delay=delay if val == "hidden" else None)
+    b = bhvr(ids, item, attr="style.visibility", dur=1,
+             extra_delay=delay if val == "hidden" else None)
     s.append(b)
     make(s, "p:to").append(make(None, "p:strVal", {"val": val}))
     return s
 
 
-def anim_effect(ids, spid, transition, filt, dur):
+def anim_effect(ids, item, transition, filt, dur, eff=None):
     ae = etree.Element(qn("p:animEffect"))
     ae.set("transition", transition)
     ae.set("filter", filt)
-    ae.append(bhvr(ids, spid, dur=dur))
+    ae.append(bhvr(ids, item, dur=dur, eff=eff))
     return ae
 
 
-def anim_pos(ids, spid, attr, from_v, to_v, dur):
+def anim_pos(ids, item, attr, from_v, to_v, dur, eff=None):
     an = etree.Element(qn("p:anim"))
     an.set("calcmode", "lin")
     an.set("valueType", "num")
-    an.append(bhvr(ids, spid, attr=attr, dur=dur, additive="base"))
+    an.append(bhvr(ids, item, attr=attr, dur=dur, additive="base", eff=eff))
     tav = make(an, "p:tavLst")
     for tm, v in ((0, from_v), (100000, to_v)):
         t = make(tav, "p:tav", {"tm": tm})
@@ -157,49 +240,164 @@ def anim_pos(ids, spid, attr, from_v, to_v, dur):
     return an
 
 
-def effect_par(ids, eff, spid, kind, start, is_first_of_click):
+def anim_scale(ids, item, from_pct, to_pct, dur, eff=None):
+    sc = etree.Element(qn("p:animScale"))
+    sc.append(bhvr(ids, item, dur=dur, eff=eff))
+    if from_pct is not None:
+        make(sc, "p:from", {"x": int(from_pct * 1000), "y": int(from_pct * 1000)})
+    make(sc, "p:to", {"x": int(to_pct * 1000), "y": int(to_pct * 1000)})
+    return sc
+
+
+def anim_rot(ids, item, by_deg, dur, eff=None):
+    r = etree.Element(qn("p:animRot"))
+    r.set("by", str(int(by_deg * 60000)))
+    r.append(bhvr(ids, item, attr="r", dur=dur, eff=eff))
+    return r
+
+
+def anim_clr(ids, item, hexcolor, dur, eff=None):
+    c = etree.Element(qn("p:animClr"))
+    c.set("clrSpc", "rgb")
+    c.set("dir", "cw")
+    c.append(bhvr(ids, item, attr="style.color", dur=dur, eff=eff))
+    to = make(c, "p:to")
+    make(to, "a:srgbClr", {"val": hexcolor})
+    return c
+
+
+def anim_motion(ids, item, dx, dy, dur, eff=None):
+    m = etree.Element(qn("p:animMotion"))
+    m.set("origin", "layout")
+    m.set("pathEditMode", "relative")
+    m.set("path", f"M 0 0 L {dx} {dy} E")
+    m.set("ptsTypes", "AA")
+    m.append(bhvr(ids, item, dur=dur, eff=eff))
+    return m
+
+
+def filter_string(name, eff):
+    tmpl, _pid, dirs = FILTER_FAMILY[name]
+    d = eff.get("dir", dirs[0] if dirs else None)
+    return tmpl.format(d=d) if "{d}" in tmpl else tmpl
+
+
+def effect_children(ids, eff, item, dur):
+    """返回 (children, is_exit, needs_hidden_at_end)。"""
+    e = eff["effect"]
+    dirn = eff.get("dir", "right")
+    ch = []
+    if e in FILTER_FAMILY:  # 含 fade / dissolveIn / circle / 棋盘 / 百叶窗 / 轮子…
+        ch.append(set_vis(ids, item, "visible"))
+        ch.append(anim_effect(ids, item, "in", filter_string(e, eff), dur, eff))
+        return ch, False, False
+    if e == "appear":
+        ch.append(set_vis(ids, item, "visible"))
+        return ch, False, False
+    if e == "wipe":
+        ch.append(set_vis(ids, item, "visible"))
+        ch.append(anim_effect(ids, item, "in", WIPE_FILTER[dirn], dur, eff))
+        return ch, False, False
+    if e == "flyIn":
+        _sub, from_v, axis = FLY_FROM[dirn]
+        other = "ppt_x" if axis == "y" else "ppt_y"
+        ch.append(set_vis(ids, item, "visible"))
+        ch.append(anim_pos(ids, item, other, f"#{other}", f"#{other}", dur, eff))
+        ch.append(anim_pos(ids, item, f"ppt_{axis}", from_v, f"#ppt_{axis}", dur, eff))
+        return ch, False, False
+    if e == "zoomIn":
+        ch.append(set_vis(ids, item, "visible"))
+        ch.append(anim_effect(ids, item, "in", "fade", dur, eff))
+        ch.append(anim_scale(ids, item, eff.get("from", 30), 100, dur, eff))
+        return ch, False, False
+    # —— 退场 ——
+    if e == "fadeOut":
+        ch.append(anim_effect(ids, item, "out", "fade", dur, eff))
+        return ch, True, True
+    if e == "zoomOut":
+        ch.append(anim_effect(ids, item, "out", "fade", dur, eff))
+        ch.append(anim_scale(ids, item, 100, eff.get("to", 30), dur, eff))
+        return ch, True, True
+    if e == "wipeOut":
+        ch.append(anim_effect(ids, item, "out", WIPE_FILTER[dirn], dur, eff))
+        return ch, True, True
+    if e == "flyOut":
+        _sub, to_v, axis = FLY_FROM[dirn]
+        other = "ppt_x" if axis == "y" else "ppt_y"
+        ch.append(anim_pos(ids, item, other, f"#{other}", f"#{other}", dur, eff))
+        ch.append(anim_pos(ids, item, f"ppt_{axis}", f"#ppt_{axis}", to_v, dur, eff))
+        return ch, True, True
+    if eff.get("out") and e in FILTER_FAMILY:
+        ch.append(anim_effect(ids, item, "out", filter_string(e, eff), dur, eff))
+        return ch, True, True
+    # —— 强调（不动可见性）——
+    if e == "pulse":
+        scale = eff.get("scale", 106)
+        e2 = dict(eff)
+        e2.setdefault("autoRev", True)
+        ch.append(anim_scale(ids, item, 100, scale, dur, e2))
+        return ch, False, False
+    if e in ("grow", "shrink"):
+        default = 120 if e == "grow" else 80
+        ch.append(anim_scale(ids, item, None, eff.get("scale", default), dur, eff))
+        return ch, False, False
+    if e == "spin":
+        ch.append(anim_rot(ids, item, eff.get("deg", 360), dur, eff))
+        return ch, False, False
+    if e == "colorTo":
+        ch.append(anim_clr(ids, item, eff.get("color", "E8590C"), dur, eff))
+        return ch, False, False
+    if e == "move":
+        ch.append(anim_motion(ids, item, eff.get("dx", 0.25), eff.get("dy", 0), dur, eff))
+        return ch, False, False
+    raise ValueError(f"未知效果: {e}")
+
+
+def effect_par(ids, eff, item, start, is_first_of_click):
     e = eff["effect"]
     dur = eff.get("dur", 450)
     dirn = eff.get("dir", "right")
-    if e == "fade":
-        preset = (10, "entr", 0)
+    if e in FILTER_FAMILY:
+        pid = FILTER_FAMILY[e][1]
+        pcls, psub = ("exit", 0) if eff.get("out") else ("entr", 0)
     elif e == "appear":
-        preset = (1, "entr", 0)
+        pid, pcls, psub = 1, "entr", 0
     elif e == "wipe":
-        preset = (22, "entr", WIPE_SUBTYPE[dirn])
-    elif e == "flyIn":
-        preset = (2, "entr", FLY_FROM[dirn][0])
+        pid, pcls, psub = 22, "entr", WIPE_SUBTYPE[dirn]
+    elif e == "wipeOut":
+        pid, pcls, psub = 22, "exit", WIPE_SUBTYPE[dirn]
+    elif e in ("flyIn", "flyOut"):
+        pid, pcls, psub = 2, "entr" if e == "flyIn" else "exit", FLY_FROM[dirn][0]
+    elif e in ("zoomIn", "zoomOut"):
+        pid, pcls, psub = 23, "entr" if e == "zoomIn" else "exit", 16
+    elif e == "fadeOut":
+        pid, pcls, psub = 10, "exit", 0
+    elif e in EMPHASIS:
+        pid = {"pulse": 26, "grow": 6, "shrink": 6, "spin": 8, "colorTo": 1}[e]
+        pcls, psub = "emph", 0
+    elif e == "move":
+        pid, pcls, psub = 0, "path", 0
     else:
-        preset = (10, "exit", 0)
-    pid, pcls, psub = preset
+        pid, pcls, psub = 0, "entr", 0
+
     node_type = ("clickEffect" if is_first_of_click and eff["trigger"] == "click"
                  else "withEffect" if eff["trigger"] == "withPrev" else "afterEffect")
     par = etree.Element(qn("p:par"))
-    ctn = make(par, "p:cTn", {"id": ids.next(), "presetID": pid, "presetClass": pcls,
-                              "presetSubtype": psub, "fill": "hold", "grpId": 0,
-                              "nodeType": node_type})
+    ctn = make(par, "p:cTn", {"presetID": pid, "presetClass": pcls, "presetSubtype": psub,
+                              "fill": "hold", "grpId": 0, "nodeType": node_type})
     st = make(ctn, "p:stCondLst")
     make(st, "p:cond", {"delay": start})
-    ch = make(ctn, "p:childTnLst")
-    if e in ("fade", "appear", "wipe", "flyIn"):
-        ch.append(set_vis(ids, spid, "visible"))
-        if e == "fade":
-            ch.append(anim_effect(ids, spid, "in", "fade", dur))
-        elif e == "wipe":
-            ch.append(anim_effect(ids, spid, "in", WIPE_FILTER[dirn], dur))
-        elif e == "flyIn":
-            sub, from_v, axis = FLY_FROM[dirn]
-            other = "ppt_x" if axis == "y" else "ppt_y"
-            ch.append(anim_pos(ids, spid, other, f"#{other}", f"#{other}", dur))
-            ch.append(anim_pos(ids, spid, f"ppt_{axis}", from_v, f"#ppt_{axis}", dur))
-    elif e == "fadeOut":
-        ch.append(anim_effect(ids, spid, "out", "fade", dur))
-        ch.append(set_vis(ids, spid, "hidden", delay=max(dur - 1, 0)))
-    return par, kind == "chart"
+    child = make(ctn, "p:childTnLst")
+    children, _is_exit, hide_at_end = effect_children(ids, eff, item, dur)
+    for c in children:
+        child.append(c)
+    if hide_at_end:
+        child.append(set_vis(ids, item, "hidden", delay=max(dur - 1, 0)))
+    return par
 
 
 def timing_tree(groups):
-    """groups: [ {auto: bool, effects: [(eff, spid, kind, start_ms)]} ]"""
+    """groups: [{auto: bool, items: [(eff, item)]}]，item=(eff, spid, kind, prg) 已含 start。"""
     ids = Ids()
     timing = etree.Element(qn("p:timing"))
     tnl = make(timing, "p:tnLst")
@@ -210,7 +408,7 @@ def timing_tree(groups):
     seq = make(rch, "p:seq", {"concurrent": 1, "nextAc": "seek"})
     main = make(seq, "p:cTn", {"id": 2, "dur": "indefinite", "nodeType": "mainSeq"})
     mch = make(main, "p:childTnLst")
-    blds = []
+    blds = {}
     for g in groups:
         gpar = make(mch, "p:par")
         gctn = make(gpar, "p:cTn", {"id": ids.next(), "fill": "hold"})
@@ -225,11 +423,16 @@ def timing_tree(groups):
         ist = make(ictn, "p:stCondLst")
         make(ist, "p:cond", {"delay": 0})
         ich = make(ictn, "p:childTnLst")
-        for i, (eff, spid, kind, start) in enumerate(g["effects"]):
-            par, is_chart = effect_par(ids, eff, spid, kind, start,
-                                       is_first_of_click=(i == 0))
-            ich.append(par)
-            blds.append((spid, is_chart))
+        for i, (eff, item, start) in enumerate(g["items"]):
+            ich.append(effect_par(ids, eff, item, start, is_first_of_click=(i == 0)))
+            spid, kind, prg = item[1], item[2], item[3]
+            if spid not in blds:
+                if kind == "chart" and eff.get("chart") in ("category", "series"):
+                    blds[spid] = ("chart", eff["chart"])
+                elif prg is not None:
+                    blds[spid] = ("para", None)
+                else:
+                    blds[spid] = ("plain", None)
     pc = make(seq, "p:prevCondLst")
     make(make(pc, "p:cond", {"evt": "onPrev", "delay": 0}), "p:tgtEl").append(
         etree.Element(qn("p:sldTgt")))
@@ -238,10 +441,13 @@ def timing_tree(groups):
         etree.Element(qn("p:sldTgt")))
     if blds:
         bl = make(timing, "p:bldLst")
-        for spid, is_chart in blds:
-            if is_chart:
+        for spid, (btype, mode) in blds.items():
+            if btype == "chart":
                 bg = make(bl, "p:bldGraphic", {"spid": spid, "grpId": 0})
-                make(bg, "p:bldAsOne")
+                sub = make(bg, "p:bldSub")
+                make(sub, "a:bldChart", {"bld": mode, "animBg": "1"})
+            elif btype == "para":
+                make(bl, "p:bldP", {"spid": spid, "grpId": 0, "build": "p"})
             else:
                 make(bl, "p:bldP", {"spid": spid, "grpId": 0})
     return timing
@@ -251,14 +457,40 @@ def transition_el(spec):
     t = etree.Element(qn("p:transition"))
     t.set("spd", TRANSITION_SPEED.get(spec.get("speed", "med"), "med"))
     typ = spec.get("type", "fade")
+    d = spec.get("dir", "l")
     if typ == "push":
-        make(t, "p:push", {"dir": spec.get("dir", "l")})
+        make(t, "p:push", {"dir": d})
     elif typ == "wipe":
-        make(t, "p:wipe", {"dir": spec.get("dir", "l")})
+        make(t, "p:wipe", {"dir": d})
+    elif typ == "cover":
+        make(t, "p:cover", {"dir": d})
+    elif typ == "uncover" or typ == "pull":
+        make(t, "p:pull", {"dir": d})
     elif typ == "cut":
         make(t, "p:cut")
     elif typ == "dissolve":
         make(t, "p:dissolve")
+    elif typ == "random":
+        make(t, "p:random")
+    elif typ == "zoom":
+        make(t, "p:zoom", {"dir": d if d in ("in", "out") else "in"})
+    elif typ == "split":
+        make(t, "p:split", {"orient": spec.get("orient", "horz"),
+                            "dir": d if d in ("in", "out") else "in"})
+    elif typ == "wheel":
+        make(t, "p:wheel", {"spokes": str(spec.get("spokes", 1))})
+    elif typ == "comb":
+        make(t, "p:comb", {"dir": spec.get("dir", "horz")})
+    elif typ in ("newsflash", "plus", "wedge", "circle", "diamond"):
+        make(t, f"p:{typ}")
+    elif typ == "checkerboard":
+        make(t, "p:checkerboard", {"dir": spec.get("dir", "vert")})
+    elif typ == "blinds":
+        make(t, "p:blinds", {"dir": spec.get("dir", "horz")})
+    elif typ == "strips":
+        make(t, "p:strips", {"dir": d})
+    elif typ == "randomBar":
+        make(t, "p:randomBar", {"dir": spec.get("dir", "horz")})
     else:
         make(t, "p:fade")
     return t
@@ -268,7 +500,6 @@ def apply(path, spec_path, out=None):
     spec = json.load(open(spec_path))
     prs = Presentation(path)
     slides = list(prs.slides)
-    tr = spec.get("transition")
     n_tr = n_an = 0
     for idx, slide in enumerate(slides, 1):
         sld = slide._element
@@ -276,6 +507,7 @@ def apply(path, spec_path, out=None):
             old = sld.find(qn(tag))
             if old is not None:
                 sld.remove(old)
+        tr = spec.get("transitions", {}).get(str(idx)) or spec.get("transition")
         if tr:
             sld.append(transition_el(tr))
             n_tr += 1
@@ -283,29 +515,29 @@ def apply(path, spec_path, out=None):
         if not effects:
             continue
         shapes = shapes_of(slide)
-        resolved = resolve_targets(effects, shapes)
+        resolved = resolve_targets(effects, shapes, slide)
         if not resolved:
             continue
-        groups, cur, t = [], {"effects": [], "auto": True}, 0
-        last_start = 0
-        for eff, spid, kind in resolved:
+        groups, cur, t, last_start = [], {"items": [], "auto": True}, 0, 0
+        for eff, spid, kind, prg in resolved:
+            item = (eff, spid, kind, prg)
             trig = eff.get("trigger", "afterPrev")
-            if trig == "click" and cur["effects"]:
+            if trig == "click" and cur["items"]:
                 groups.append(cur)
-                cur, t, last_start = {"effects": [], "auto": False}, 0, 0
-            if not cur["effects"]:
+                cur, t, last_start = {"items": [], "auto": False}, 0, 0
+            if not cur["items"]:
                 cur["auto"] = trig != "click"
             delay = eff.get("delay", 0)
             dur = eff.get("dur", 450)
-            if trig == "withPrev":          # 与上一个效果同时起（可加 delay 偏移）
+            if trig == "withPrev":
                 start = last_start + delay
                 last_start = start
-            else:                            # afterPrev / click：顺排
+            else:
                 start = t + delay
                 t = start + dur
                 last_start = start
-            cur["effects"].append((eff, spid, kind, start))
-        if cur["effects"]:
+            cur["items"].append((eff, item, start))
+        if cur["items"]:
             groups.append(cur)
         sld.append(timing_tree(groups))
         n_an += 1
