@@ -1,0 +1,16 @@
+# 运行时产物（含个人数据，不入库）
+decks/
+memory/
+
+# 依赖
+node_modules/
+
+# 构建与渲染中间物
+render/
+*.log
+
+# 系统
+.DS_Store
+
+# ZCode 会话内部文件
+.zcode/plans/

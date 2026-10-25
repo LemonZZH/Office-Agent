@@ -1,0 +1,16 @@
+{
+  "name": "office-agent",
+  "version": "0.1.0",
+  "description": "A ZCode agent that turns any input — a sentence, a document, a photo — into a polished PPT, refined through conversation.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": "[\"ppt\",\"pptx\",\"agent\",\"zcode\",\"slides\",\"presentation\"]",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  },
+  "type": "commonjs"
+}
