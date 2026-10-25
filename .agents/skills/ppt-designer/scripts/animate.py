@@ -213,7 +213,7 @@ def bhvr(ids, item, attr=None, dur=None, extra_delay=None, additive=None, eff=No
 def set_vis(ids, item, val, delay=0):
     s = etree.Element(qn("p:set"))
     b = bhvr(ids, item, attr="style.visibility", dur=1,
-             extra_delay=delay if val == "hidden" else None)
+             extra_delay=delay if val == "hidden" else 0)
     s.append(b)
     make(s, "p:to").append(make(None, "p:strVal", {"val": val}))
     return s
@@ -353,7 +353,7 @@ def effect_children(ids, eff, item, dur):
     raise ValueError(f"未知效果: {e}")
 
 
-def effect_par(ids, eff, item, start, is_first_of_click):
+def effect_par(ids, eff, item, start, node_type):
     e = eff["effect"]
     dur = eff.get("dur", 450)
     dirn = eff.get("dir", "right")
@@ -380,8 +380,7 @@ def effect_par(ids, eff, item, start, is_first_of_click):
     else:
         pid, pcls, psub = 0, "entr", 0
 
-    node_type = ("clickEffect" if is_first_of_click and eff["trigger"] == "click"
-                 else "withEffect" if eff["trigger"] == "withPrev" else "afterEffect")
+    node_type = node_type or ("withEffect" if eff["trigger"] == "withPrev" else "afterEffect")
     par = etree.Element(qn("p:par"))
     ctn = make(par, "p:cTn", {"presetID": pid, "presetClass": pcls, "presetSubtype": psub,
                               "fill": "hold", "grpId": 0, "nodeType": node_type})
@@ -397,7 +396,15 @@ def effect_par(ids, eff, item, start, is_first_of_click):
 
 
 def timing_tree(groups):
-    """groups: [{auto: bool, items: [(eff, item)]}]，item=(eff, spid, kind, prg) 已含 start。"""
+    """规范三层 par 结构（WPS/PowerPoint 通吃的 canonical 形态）:
+
+    seq(mainSeq)
+      └ par L1「点击组」  cTn stCondLst: indefinite(点击开始) | 0(进片自动开始)
+        └ par L2「同时批次」 cTn stCondLst: delay=批次的组内累计起始
+          └ par L3「效果」  cTn presetID/nodeType, stCondLst: delay=批内偏移
+            └ behaviors(set/animEffect/anim*/animMotion...)
+    自动接续(afterPrev) = 新的 L2 批次（delay 累计）；同时(withPrev) = 同批次内偏移。
+    """
     ids = Ids()
     timing = etree.Element(qn("p:timing"))
     tnl = make(timing, "p:tnLst")
@@ -410,29 +417,41 @@ def timing_tree(groups):
     mch = make(main, "p:childTnLst")
     blds = {}
     for g in groups:
-        gpar = make(mch, "p:par")
-        gctn = make(gpar, "p:cTn", {"id": ids.next(), "fill": "hold"})
-        gst = make(gctn, "p:stCondLst")
-        make(gst, "p:cond", {"delay": "indefinite"})
-        if g["auto"]:
-            cond = make(gst, "p:cond", {"evt": "onBegin", "delay": 0})
-            make(cond, "p:tn", {"val": 2})
-        gch = make(gctn, "p:childTnLst")
-        ipar = make(gch, "p:par")
-        ictn = make(ipar, "p:cTn", {"id": ids.next(), "fill": "hold"})
-        ist = make(ictn, "p:stCondLst")
-        make(ist, "p:cond", {"delay": 0})
-        ich = make(ictn, "p:childTnLst")
+        l1 = make(mch, "p:par")
+        l1c = make(l1, "p:cTn", {"id": ids.next(), "fill": "hold"})
+        l1s = make(l1c, "p:stCondLst")
+        make(l1s, "p:cond", {"delay": "indefinite" if not g["auto"] else 0})
+        l1ch = make(l1c, "p:childTnLst")
+        # —— L2 批次划分：trigger != withPrev 开新批 ——
+        batches, cur_batch = [], None
         for i, (eff, item, start) in enumerate(g["items"]):
-            ich.append(effect_par(ids, eff, item, start, is_first_of_click=(i == 0)))
-            spid, kind, prg = item[1], item[2], item[3]
-            if spid not in blds:
-                if kind == "chart" and eff.get("chart") in ("category", "series"):
-                    blds[spid] = ("chart", eff["chart"])
-                elif prg is not None:
-                    blds[spid] = ("para", None)
+            if cur_batch is None or eff.get("trigger", "afterPrev") != "withPrev":
+                cur_batch = {"start": start, "items": []}
+                batches.append(cur_batch)
+            cur_batch["items"].append((eff, item, start, i))
+        for b in batches:
+            l2 = make(l1ch, "p:par")
+            l2c = make(l2, "p:cTn", {"id": ids.next(), "fill": "hold"})
+            l2s = make(l2c, "p:stCondLst")
+            make(l2s, "p:cond", {"delay": b["start"]})
+            l2ch = make(l2c, "p:childTnLst")
+            for eff, item, start, gi in b["items"]:
+                rel = start - b["start"]
+                if gi == 0 and not g["auto"]:
+                    ntype = "clickEffect"
+                elif eff.get("trigger", "afterPrev") == "withPrev":
+                    ntype = "withEffect"
                 else:
-                    blds[spid] = ("plain", None)
+                    ntype = "afterEffect"
+                l2ch.append(effect_par(ids, eff, item, rel, ntype))
+                spid, kind, prg = item[1], item[2], item[3]
+                if spid not in blds:
+                    if kind == "chart" and eff.get("chart") in ("category", "series"):
+                        blds[spid] = ("chart", eff["chart"])
+                    elif prg is not None:
+                        blds[spid] = ("para", None)
+                    else:
+                        blds[spid] = ("plain", None)
     pc = make(seq, "p:prevCondLst")
     make(make(pc, "p:cond", {"evt": "onPrev", "delay": 0}), "p:tgtEl").append(
         etree.Element(qn("p:sldTgt")))
