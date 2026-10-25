@@ -204,8 +204,8 @@ def classify(slide, shapes):
     return roles
 
 
-def build_auto(slide, shapes, used, base, page_no):
-    """自动编排：返回 {'auto': True, 'items': [(eff, item, start)]}。
+def build_auto(slide, shapes, used, base, page_no, t0=0):
+    """自动编排：返回 {'auto': True, 'items': [(eff, item, start)]}（start 含 t0 偏移）。
     规则: 铬件静态；截图 fade、大数字 zoomIn、正文 fade；同行(Δy<0.55)成组，
     组内小 stagger、组间顺序推进；总时长 >3.6s 自动压缩节奏。"""
     roles = classify(slide, shapes)
@@ -243,7 +243,7 @@ def build_auto(slide, shapes, used, base, page_no):
                      "dur": min(dur + 140, 900)}
             else:
                 e = {"effect": "fade", "trigger": "afterPrev", "dur": dur}
-            out.append((e, (e, spid, kind, None), t + j * stag))
+            out.append((e, (e, spid, kind, None), t0 + t + j * stag))
         t += dur + gap + (len(its) - 1) * stag
     print(f"  ~ p{page_no} auto 编排: {len(out)} 动画 / {n_static} 静态 / {len(batches)} 批（预计 ~{t}ms）")
     return {"auto": True, "items": out}
@@ -521,11 +521,15 @@ def timing_tree(groups):
     main = make(seq, "p:cTn", {"id": 2, "dur": "indefinite", "nodeType": "mainSeq"})
     mch = make(main, "p:childTnLst")
     blds = {}
-    for g in groups:
+    for gi, g in enumerate(groups):
         l1 = make(mch, "p:par")
         l1c = make(l1, "p:cTn", {"id": ids.next(), "fill": "hold"})
         l1s = make(l1c, "p:stCondLst")
-        make(l1s, "p:cond", {"delay": "indefinite" if not g["auto"] else 0})
+        make(l1s, "p:cond", {"delay": "indefinite"})
+        if gi == 0 and g.get("auto"):
+            # 开场自动组：引用 mainSeq(id=2) 的 onBegin —— 随页面进入即启动（PowerPoint 原生写法）
+            cond = make(l1s, "p:cond", {"evt": "onBegin", "delay": 0})
+            make(cond, "p:tn", {"val": 2})
         l1ch = make(l1c, "p:childTnLst")
         # —— L2 批次划分：trigger != withPrev 开新批 ——
         batches, cur_batch = [], None
@@ -639,40 +643,60 @@ def apply(path, spec_path, out=None):
         if not effects:
             continue
         shapes = shapes_of(slide)
-        # 分流：auto 编排条目（应放在列表末尾）与其余点名效果
+        # 先解析全部点名效果（auto 需要排除已点名目标），再按声明顺序编排
         named_effs = [e for e in effects if e.get("effect") != "auto"]
-        auto_effs = [e for e in effects if e.get("effect") == "auto"]
-        resolved = []
+        auto_seq = [e for e in effects if e.get("effect") == "auto"]
+        named_res = []
         used = set()
         for eff in named_effs:
             for it in resolve_targets([eff], shapes, slide):
-                resolved.append(it)
+                named_res.append((eff, it))
                 used.add(it[1])
         # WPS 兼容：图表挂进退场动画会在全屏放映时不触发（元素被隐藏）——
         # 默认跳过图表的进退场（随页面直接显示）；PowerPoint 场景可 spec 加 "animate_charts": true
         if not spec.get("animate_charts"):
             skip_vis = {"appear", "auto"} | ENTRANCE | EXIT_SET
-            kept = []
-            for eff, spid, kind, prg in resolved:
-                e = eff["effect"]
-                if kind == "chart" and (e in skip_vis or eff.get("out")):
+            keep = []
+            for eff, item in named_res:
+                if item[2] == "chart" and (eff["effect"] in skip_vis or eff.get("out")):
                     print(f"  ~ p{idx} 图表跳过进退场（WPS 兼容）: {eff['target']}")
                     continue
-                kept.append((eff, spid, kind, prg))
-            resolved = kept
-        if not resolved and not auto_effs:
+                keep.append((eff, item))
+            named_res = keep
+        if not named_res and not auto_seq:
             continue
-        groups, cur, t, last_start = [], {"items": [], "auto": True}, 0, 0
-        for eff, spid, kind, prg in resolved:
-            item = (eff, spid, kind, prg)
-            trig = eff.get("trigger", "afterPrev")
-            if trig == "click" and cur["items"]:
+        # 统一序列：按声明顺序展开（byPara/"*" 会一化多），auto 保留为标记
+        seq = []
+        named_iter = iter(named_res)
+        for eff in effects:
+            if eff.get("effect") == "auto":
+                seq.append(("auto", eff, None))
+            else:
+                for _ in resolve_targets([eff], shapes, slide):
+                    seq.append(("item", None, next(named_iter)))
+        # 推进模型（canonical）：开场一个"自动组"承载 auto 与顺排点名（onBegin 引用 mainSeq
+        # 随页面启动，效果间用组内累计延时串行）；只有 click 才开新的"点击组"（indefinite 等点击）。
+        groups, cur, t, last_start = [], None, 0, 0
+        for kind_of, aeff, named_item in seq:
+            if kind_of == "auto":
+                if cur is None:
+                    cur = {"items": [], "auto": True}
+                ag = build_auto(slide, shapes, used, aeff, idx, t)
+                cur["items"].extend(ag["items"])
+                if ag["items"]:
+                    last = ag["items"][-1]
+                    t = last[2] + last[0].get("dur", 380)
+                continue
+            eff2, (fe, spid, kind, prg) = named_item
+            item = (fe, spid, kind, prg)
+            trig = eff2.get("trigger", "afterPrev")
+            if cur is not None and cur["items"] and trig == "click":
                 groups.append(cur)
-                cur, t, last_start = {"items": [], "auto": False}, 0, 0
-            if not cur["items"]:
-                cur["auto"] = trig != "click"
-            delay = eff.get("delay", 0)
-            dur = eff.get("dur", 450)
+                cur, t, last_start = None, 0, 0
+            if cur is None:
+                cur = {"items": [], "auto": trig != "click"}
+            delay = eff2.get("delay", 0)
+            dur = eff2.get("dur", 450)
             if trig == "withPrev":
                 start = last_start + delay
                 last_start = start
@@ -680,13 +704,11 @@ def apply(path, spec_path, out=None):
                 start = t + delay
                 t = start + dur
                 last_start = start
-            cur["items"].append((eff, item, start))
-        if cur["items"]:
+            cur["items"].append((eff2, item, start))
+        if cur is not None and cur["items"]:
             groups.append(cur)
-        if auto_effs:
-            ag = build_auto(slide, shapes, used, auto_effs[0], idx)
-            if ag["items"]:
-                groups.append(ag)
+        if not groups:
+            continue
         sld.append(timing_tree(groups))
         n_an += 1
     prs.save(out or path)
