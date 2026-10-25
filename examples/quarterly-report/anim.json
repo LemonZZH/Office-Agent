@@ -1,0 +1,18 @@
+{
+  "transition": {"type": "fade", "speed": "med"},
+  "slides": {
+    "1":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 450, "stagger": 180}],
+    "2":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 120}],
+    "3":  [{"target": "*", "effect": "flyIn", "dir": "left", "trigger": "afterPrev", "dur": 400, "stagger": 100}],
+    "4":  [{"target": "kpi-growth", "effect": "fade", "trigger": "afterPrev", "dur": 450},
+           {"target": "growth-label", "effect": "fade", "trigger": "afterPrev", "dur": 350},
+           {"target": "chart-revenue", "effect": "wipe", "dir": "right", "trigger": "afterPrev", "dur": 700}],
+    "5":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 150}],
+    "6":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 120}],
+    "7":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 350, "stagger": 100}],
+    "8":  [{"target": "*", "effect": "flyIn", "dir": "bottom", "trigger": "afterPrev", "dur": 400, "stagger": 150}],
+    "9":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 120}],
+    "10": [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 400, "stagger": 150}],
+    "11": []
+  }
+}

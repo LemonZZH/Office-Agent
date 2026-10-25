@@ -1,0 +1,15 @@
+{
+  "transition": {"type": "fade", "speed": "slow"},
+  "slides": {
+    "1":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 900, "stagger": 300}],
+    "2":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 800, "stagger": 250}],
+    "3":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 900}],
+    "4":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 700, "stagger": 200}],
+    "5":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 800, "stagger": 250}],
+    "6":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 700, "stagger": 180}],
+    "7":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 900, "stagger": 250}],
+    "8":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 600, "stagger": 150}],
+    "9":  [{"target": "*", "effect": "fade", "trigger": "afterPrev", "dur": 900}],
+    "10": []
+  }
+}

@@ -15,8 +15,8 @@
 
 ## 硬性约束
 
-- 构建一律 pptxgenjs + LAYOUT_WIDE（13.33×7.5"），配色/字体从 theme.js 常量引用，禁止散落硬编码。
-- 每次重建后必跑 `python3 .agents/skills/ppt-designer/scripts/qa_check.py <deck.pptx>`；布局级大改后再跑 render.sh + 视觉验收。
+- 构建一律 pptxgenjs + LAYOUT_WIDE（13.33×7.5"），配色/字体从 theme.js 常量引用，禁止散落硬编码；换肤 = `THEME=./theme-x.js OUT=xxx.pptx node build.js`。
+- 构建后按 anim.json 注入动效（`scripts/animate.py`，支持切换/进场/退场），再跑 `qa_check.py`；布局级大改后再跑 render.sh + 视觉验收。
 - 渲染依赖 LibreOffice（soffice）与 poppler（pdftoppm）；官方 presentations 插件的 pptx 技能负责库级规范（API、避坑、模板继承），构建前加载它。
 - 涉及 dreamina 生图会消耗积分，先告知用户再执行。
 - 不复制第三方技能/插件的文本内容进本仓库（开源合规，MIT）。

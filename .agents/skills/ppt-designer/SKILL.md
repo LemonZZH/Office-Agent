@@ -69,7 +69,17 @@ module.exports = {
 
 本技能追加要求：`LAYOUT_WIDE`（13.33×7.5"）；所有坐标从 W/H/M 派生；每页一个视觉焦点；图表用原生 addChart（样式跟随 theme.js）；图片 `sizing: cover` 防拉伸；文案入片前对照 outline 的关键信息，不凭空扩写；每页加 speaker notes（演讲者备注写"这页讲什么+强调点"）。
 
-## 6. QA 门（每次构建后必跑）
+### 5.5 动效（构建后注入）
+
+pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
+
+1. build.js 中给需要精确控制的元素加 `objectName`（图表、KPI 大数字、卡片等）。
+2. 写 `anim.json`：`transition`（全场切换，默认 fade）+ `slides`（逐页进场/退场）。`target: "*"` = 该页全部形状按位置排序级联；`target: objectName` = 精准指向。效果：fade / wipe / flyIn / appear / fadeOut；trigger：afterPrev / withPrev / click。
+3. `python3 scripts/animate.py deck.pptx anim.json`（原地注入；rebuild 后需重跑）。
+
+动效纪律：**动效为叙事服务，不是炫技**。汇报档克制（fade/wipe 级联）；路演档数据页用 wipe 强化"增长感"；高端档慢 fade（600–900ms、大 stagger）营造节奏；封底页留空不加元素动画。同一形状可叠加进场+退场。
+
+## 6. QA 门（动效注入后必跑）
 
 1. `python3 scripts/qa_check.py <deck>.pptx` — 溢出/越界/重叠/占位符。有问题先修再进下一关。
    - 预览环境注意（macOS）：中文渲染空白 → 把系统 CJK 字体拷入 LibreOffice 自带字体目录（见 render.sh 头注释）；**粗体中的半角 `+` 会回退成 `✦`** → 粗体文案用中文表述（"同比增长 23%"），半角 + 只出现在常规体中。
