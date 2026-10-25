@@ -3,6 +3,7 @@
 
 用法: python3 animate.py <deck.pptx> <anim.json> [--out <output.pptx>]
   默认原地覆盖（build.js 重建后需重跑）。
+  WPS 兼容：图表的进退场默认跳过（全屏放映不触发会隐藏图表）；顶层 "animate_charts": true 可开启（PowerPoint 生效）。
 
 anim.json 结构:
 {
@@ -535,6 +536,18 @@ def apply(path, spec_path, out=None):
             continue
         shapes = shapes_of(slide)
         resolved = resolve_targets(effects, shapes, slide)
+        # WPS 兼容：图表挂进退场动画会在全屏放映时不触发（元素被隐藏）——
+        # 默认跳过图表的进退场（随页面直接显示）；PowerPoint 场景可 spec 加 "animate_charts": true
+        if not spec.get("animate_charts"):
+            skip_vis = {"appear"} | ENTRANCE | EXIT_SET
+            kept = []
+            for eff, spid, kind, prg in resolved:
+                e = eff["effect"]
+                if kind == "chart" and (e in skip_vis or eff.get("out")):
+                    print(f"  ~ p{idx} 图表跳过进退场（WPS 兼容）: {eff['target']}")
+                    continue
+                kept.append((eff, spid, kind, prg))
+            resolved = kept
         if not resolved:
             continue
         groups, cur, t, last_start = [], {"items": [], "auto": True}, 0, 0

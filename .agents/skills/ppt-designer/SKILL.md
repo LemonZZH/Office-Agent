@@ -75,6 +75,8 @@ module.exports = {
 
 本技能追加要求：`LAYOUT_WIDE`（13.33×7.5"）；所有坐标从 W/H/M 派生；每页一个视觉焦点；图表用原生 addChart（样式跟随 theme.js）；图片 `sizing: cover` 防拉伸；文案入片前对照 outline 的关键信息，不凭空扩写；每页加 speaker notes（演讲者备注写"这页讲什么+强调点"）。
 
+**质感层（对抗"平铺色很廉价"）**：`python3 scripts/make_bg.py <theme.js>` 由当前配色本地生成 `assets/bg-dark.jpg`（深色纵向渐变+角部微光+颗粒）、`bg-light.jpg`（浅色克制渐变）、`glow.png`（ACCENT 径向辉光）。用法：封面/封底/深色页 `s.background = { path: "assets/bg-dark.jpg" }`；大数字/关键标题先垫 `s.addImage({ path: "assets/glow.png", ..., transparency: 35–60 })` 再写字；图表浮于渐变时 chartArea fill 加 `transparency: 100`。高端/路演档默认启用；汇报档至少封面封底用。theme 换肤后重跑 make_bg 再构建。
+
 ### 5.5 动效（构建后注入）
 
 pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
@@ -97,6 +99,8 @@ pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
 | 切换 | fade / push / wipe / zoom / cover / split / wheel / comb / dissolve / checkerboard / blinds / strips / wedge / circle / random… | 全场统一，按页覆盖 |
 
 动效纪律：**动效为叙事服务，不是炫技**。汇报档克制（fade/wipe 级联 + 图表按类构建）；路演档数据页 wipe 强化"增长感"；高端档慢 fade（600–900ms、大 stagger）；封底页留空。同一形状可叠加（进场→强调→退场）。滤镜家族与强调类默认只用于演示/氛围页。参考完整示例：`decks/effects-showcase/`。
+
+**WPS 兼容性**：图表挂进退场动画在 WPS 全屏放映不触发（图表被隐藏）——animate.py 默认跳过图表的进退场（图表随页面显示，日志有提示）；确需 PowerPoint 的按类/按系列构建时，anim.json 顶层加 `"animate_charts": true` 并接受 WPS 降级为静态显示。
 
 ## 6. QA 门（动效注入后必跑）
 
