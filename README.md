@@ -48,7 +48,7 @@
 - **多模态摄入** —— 一段话（推断补全）、文档（docx/pdf/md/xlsx，markitdown 提取）、图片（白板照片/手写笔记做内容源，参考图做风格源）、已有 .pptx（默认重建，或按模板继承修改）
 - **对话式迭代** —— 每份 PPT 是一个可再生工作区（大纲 + 设计 token + 构建脚本），改哪层修哪层，重建 + QA 自动验证
 - **记忆** —— 记住你的视觉偏好、设计反馈与作品索引（`memory/`），越用越懂你
-- **风格自适应** —— 汇报 / 路演 / 高端三套预设自动选择，也可用自然语言任意指定；高端档逐案定制设计方向
+- **风格自适应** —— 汇报 / 路演 / 高端三套预设自动选择，也可用自然语言任意指定；高端档逐案定制设计方向；**“照这个风格做”**：`theme_from_image.py` 从参考图/海报提取配色生成 theme（背景聚类 + 主强调色提取 + 深浅自动判定），换肤零代码改动
 - **动效注入** —— pptxgenjs 不支持动画？`animate.py` 做 OOXML 后处理，`anim.json` 声明式驱动：切换动效大家族（zoom/push/split/wheel/comb…）、元素进场/退场（fade/wipe/flyIn/zoomIn/棋盘/百叶窗/轮辐…）、**强调**（脉冲/旋转/变色/缩放）、**路径动画**、**图表按类逐根升起**、**逐段文字进场**，`objectName` 精准指向元素。全套效果演示见 [examples/effects-showcase](examples/effects-showcase/)
 - **QA 门** —— 程序化检查（溢出/重叠/越界/占位符）+ LibreOffice 渲染 + 视觉验收，不通过不交付
 
@@ -101,6 +101,7 @@ cp /System/Library/Fonts/STHeiti*.ttc /Applications/LibreOffice.app/Contents/Res
 帮我做一份 Q3 经营汇报，重点讲营收和成本
 根据 这份产品资料.docx 做一版融资路演
 照这张白板照片安排发布会 PPT
+照这张海报的风格做（参考图 → 自动提取配色生成 theme）
 ```
 
 生成后继续对话迭代：

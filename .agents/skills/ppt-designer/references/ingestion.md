@@ -26,7 +26,7 @@
 先判断图片的角色（可多兼）：
 
 - **内容源**（白板照片、手写笔记、截图、报纸版面）：Read 视觉读取，提取其中的结构、文字、数据 → 作为 outline 原料。提取不出的字注明，不猜数。
-- **风格参考**（用户说"照这个风格/像这样的"）：Read 观察配色（估 BG/PRIMARY/ACCENT 色值）、版式密度、母题 → 写入 brief.md 的风格决策，theme.js 按观察值生成。
+- **风格参考**（用户说"照这个风格/像这样的"）：Read 视觉判读气质/版式/motif + `scripts/theme_from_image.py` 提取配色候选（--out 直接生成 theme-from-ref.js，agent 微调 FONT 与 motif 后定稿）→ 写入 brief.md 的风格决策。
 - **素材**（用户提供的 logo、产品图、人像）：存入 `assets/` 直接使用；logo 注意留白与对比度。
 
 ## 已有 .pptx

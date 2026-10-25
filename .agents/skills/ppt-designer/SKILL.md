@@ -31,6 +31,12 @@ description: 生成与迭代 PPT 的主技能。只要用户提到做 PPT/幻灯
 用户可用自然语言覆盖任何细节（"深色""活泼点""像 Apple 发布会"），以其为准。
 配色/字体从 `references/design-tokens.md` 取预设或按其规则逐案生成。
 
+**风格参考图流程**（用户说"照这个风格/参考这张海报"时）：
+1. Read 视觉判读参考图：行业气质、字体感受（衬线/无衬线）、版式密度、候选 motif。
+2. `python3 scripts/theme_from_image.py <参考图> --out decks/<name>/theme-from-ref.js` 提取配色 token（背景=边缘众数聚类、PRIMARY=高覆盖高饱和、ACCENT=异色相高饱和或明度变体、深浅自动判定）。
+3. 以脚本输出为候选做人工判读微调：PRIMARY/ACCENT 语义是否符合参考图的视觉主角；字体按判读替换 FONT；把 motif 写进 theme。
+4. theme 定稿后正常走大纲→构建（`THEME=` 或改名为 theme.js）。
+
 ## 3. 大纲 `outline.md`
 
 逐页大纲是**内容的唯一事实源**，格式：
