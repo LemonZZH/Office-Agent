@@ -29,7 +29,7 @@ description: 生成与迭代 PPT 的主技能。只要用户提到做 PPT/幻灯
 - **高端**（`references/style-premium.md`）：发布会、品牌、决审投标 → 逐案定制 + AI 配图
 
 用户可用自然语言覆盖任何细节（"深色""活泼点""像 Apple 发布会"），以其为准。
-配色/字体从 `references/design-tokens.md` 取预设或按其规则逐案生成。
+配色/字体从 `references/design-tokens.md` 取预设或按其规则逐案生成；**"高大上"的完整打法见 `references/premium-patterns.md`**（一页一大思想 / 衬线 Display × 无衬线正文 / 玻璃卡片 / 暗角渐变 / 数字戏剧化）——高端档与所有封面/大数字默认遵循。
 
 **风格参考图流程**（用户说"照这个风格/参考这张海报"时）：
 1. Read 视觉判读参考图：行业气质、字体感受（衬线/无衬线）、版式密度、候选 motif。

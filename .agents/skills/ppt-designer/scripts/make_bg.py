@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 W, H = 1920, 1080
 G = 1024
@@ -74,6 +74,31 @@ def grain(img, sigma=16, strength=0.045):
     return Image.blend(img, n, strength)
 
 
+def vgrad(c_top, c_bottom, w=W, h=H, diagonal=True, vignette=0.22, streak=True):
+    """对角渐变 + 暗角 + 对角光带（小图逐像素后放大，快且平滑）。"""
+    sw, sh = 480, 270
+    small = Image.new("RGB", (sw, sh))
+    px = small.load()
+    for y in range(sh):
+        for x in range(sw):
+            t = (x / sw + y / sh) / 2 if diagonal else y / sh
+            px[x, y] = mix(c_top, c_bottom, t)
+    img = small.resize((w, h), Image.BILINEAR)
+    if streak:  # 对角柔光带
+        band = Image.new("L", (w, h), 0)
+        bd = ImageDraw.Draw(band)
+        bd.polygon([(int(w * 0.55), 0), (int(w * 0.8), 0), (int(w * 0.25), h), (int(w * 0.05), h)],
+                   fill=26)
+        band = band.filter(ImageFilter.GaussianBlur(160))
+        img = Image.composite(Image.new("RGB", (w, h), (255, 255, 255)), img,
+                              band.point(lambda v: v // 3))
+    if vignette:  # 暗角
+        r = Image.radial_gradient("L").resize((w, h)).point(
+            lambda v: int((v / 255) ** 1.8 * vignette * 255))
+        img = Image.composite(Image.new("RGB", (w, h), (0, 0, 0)), img, r)
+    return img
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -88,8 +113,9 @@ def main():
     accent = hex2rgb(T["ACCENT"])
     primary = hex2rgb(T["PRIMARY"])
 
-    # bg-dark：纵向 DARK→更深，角部 ACCENT/PRIMARY 微光，颗粒
-    bg = vgrad(clamp(mix(dark, (0, 0, 0), 0.12)), clamp(mix(dark, (255, 255, 255), 0.05)))
+    # bg-dark：对角渐变 DARK→更深 + 暗角 + 光带，角部 ACCENT/PRIMARY 微光，颗粒
+    bg = vgrad(clamp(mix(dark, (0, 0, 0), 0.14)), clamp(mix(dark, (255, 255, 255), 0.06)),
+               vignette=0.24)
     corner_tint(bg, accent, "tr", 26)
     corner_tint(bg, primary, "bl", 20)
     bg = grain(bg)
