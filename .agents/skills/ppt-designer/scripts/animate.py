@@ -766,6 +766,10 @@ def apply(path, spec_path, out=None):
                 cur = {"items": [], "auto": trig != "click"}
             delay = eff2.get("delay", 0)
             dur = eff2.get("dur", 450)
+            if trig == "ambient":  # 氛围层：绝对延时启动，不推进读序时钟
+                start = delay
+                cur["items"].append((eff2, item, start))
+                continue
             if trig == "withPrev":
                 start = last_start + delay
                 last_start = start

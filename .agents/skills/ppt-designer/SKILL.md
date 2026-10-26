@@ -110,14 +110,16 @@ pptxgenjs 不支持动画——用 `scripts/animate.py` 做 OOXML 后处理：
 
 动效纪律：**动效为叙事服务，不是炫技**。汇报档克制（fade/wipe 级联 + 图表按类构建）；路演档数据页 wipe 强化"增长感"；高端档慢 fade（600–900ms、大 stagger）；封底页留空。同一形状可叠加（进场→强调→退场）。滤镜家族与强调类默认只用于演示/氛围页。参考完整示例：`decks/effects-showcase/`。
 
-### 5.6 动效素材（联网下载 / 本地生成）
+### 5.6 动效素材（矢量优先）
 
-封面与章节页可用**动态素材**提升氛围（发布会做法）：视频垫底 → 压暗蒙版 → 文字在上。
+封面与章节页的氛围层按**优先级阶梯**选型，能用矢量不用位图，能本地不联网：
 
-- **联网下载**：`python3 scripts/fetch_assets.py search <英文关键词>` → 列出候选（Mixkit 免费商用）→ `fetch <序号> --dir decks/<name>/assets --name motion.mp4`。许可自动写入 `assets/license.json` 随 deck 存档；优先选 360p/720p（垫底压暗后清晰度足够）；>25MB 拒收。
-- **本地生成（零网络/零积分兜底）**：`python3 scripts/make_motion.py <theme.js>` → 由当前配色生成无缝循环动效 GIF（漂移光斑氛围层，~1MB）。
-- **嵌入**：视频 `s.addMedia({ type: "video", path: "assets/motion.mp4", x, y, w, h })`（放映自动播放）；GIF 直接 `addImage`（放映自动循环）。二者都置于**最底层**，其上压 `T.BG` 色 35–45% 透明矩形保证文字对比度。
-- **纪律**：动效素材只用于封面/章节/收束等氛围位，内容页禁用（干扰信息）；每页至多一层；交付时如使用第三方素材，在交付说明中列明来源与许可。
+1. **矢量背景（默认）**：`make_bg.py` 现同时产出 `bg-dark.svg / glow.svg`（渐变+暗角+角光，体积极小、无限清晰）。pptxgenjs 嵌 SVG 时自动附带 PNG 兜底（svgBlip），新旧播放器都能渲染。深色页 `s.background = { path: "assets/bg-dark.svg" }`。
+2. **矢量动效（默认）**：原生形状光斑 + `ambient` 触发器——两三个高透明度大椭圆（ACCENT/PRIMARY，transparency 88–92）垫在文字下，anim.json 里 `{"effect":"move","dx":0.1,"dy":-0.08,"trigger":"ambient","dur":11000,"autoRev":true}` 缓慢往返漂移。`ambient` 不推进读序时钟（不阻塞标题/正文编排），是纯氛围层。WPS/PowerPoint 全兼容。
+3. **GIF（兜底）**：`make_motion.py` 本地生成无缝循环 GIF（零网络/零积分），`addImage` 置底层+压暗。
+4. **视频（兜底/确需真实影像时）**：`fetch_assets.py` 联网下载（Mixkit 免费商用，许可写入 assets/license.json），`addMedia` 内嵌，放映自动播放。
+
+纪律不变：素材层永远垫底、压暗后放文字；只用于封面/章节/收束，内容页禁用；第三方素材交付时列明来源与许可。
 
 **编排原则（动效要有逻辑，不是扫场）**：
 

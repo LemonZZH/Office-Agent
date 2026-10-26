@@ -135,7 +135,51 @@ def main():
     glow = Image.alpha_composite(glow, layer).filter(ImageFilter.GaussianBlur(30))
     glow.save(os.path.join(out_dir, "glow.png"))
 
-    print(f"assets → {out_dir}/bg-dark.jpg, bg-light.jpg, glow.png")
+    # —— SVG 矢量版（无限清晰、体积极小；PowerPoint 2016+/WPS 2019+ 原生渲染，
+    #     pptxgenjs 自动内嵌 PNG 兜底给旧播放器）——
+    d_hex, p_hex, a_hex = T.get("DARK", T["BG"]), T["PRIMARY"], T["ACCENT"]
+
+    def rgbhex(rgb):
+        return "".join(f"{c:02X}" for c in rgb[:3])
+
+    def svg_bg():
+        darker = rgbhex(mix(hex2rgb(d_hex), (0, 0, 0), 0.14))
+        return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#{d_hex}"/><stop offset="1" stop-color="#{darker}"/>
+    </linearGradient>
+    <radialGradient id="v" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.5" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.3"/>
+    </radialGradient>
+    <radialGradient id="tr" cx="1" cy="0" r="0.8">
+      <stop offset="0" stop-color="#{a_hex}" stop-opacity="0.16"/>
+      <stop offset="0.6" stop-color="#{a_hex}" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bl" cx="0" cy="1" r="0.8">
+      <stop offset="0" stop-color="#{p_hex}" stop-opacity="0.12"/>
+      <stop offset="0.6" stop-color="#{p_hex}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#g)"/>
+  <rect width="1920" height="1080" fill="url(#tr)"/>
+  <rect width="1920" height="1080" fill="url(#bl)"/>
+  <rect width="1920" height="1080" fill="url(#v)"/>
+</svg>"""
+
+    def svg_glow():
+        return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs><radialGradient id="gl" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#{a_hex}" stop-opacity="0.5"/>
+    <stop offset="1" stop-color="#{a_hex}" stop-opacity="0"/>
+  </radialGradient></defs>
+  <rect width="1024" height="1024" fill="url(#gl)"/>
+</svg>"""
+
+    open(os.path.join(out_dir, "bg-dark.svg"), "w").write(svg_bg())
+    open(os.path.join(out_dir, "glow.svg"), "w").write(svg_glow())
+    print(f"assets → {out_dir}/bg-dark.jpg|svg, bg-light.jpg, glow.png|svg")
 
 
 if __name__ == "__main__":
